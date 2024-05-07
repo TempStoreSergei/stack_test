@@ -3,7 +3,6 @@ export default defineNuxtConfig({
 	devtools: { enabled: true },
 	modules: [],
 	css: ["@/app/normalize.min.css","@/app/global.css"],
-	ssr: true,
 
 	imports: {
 		dirs: [
