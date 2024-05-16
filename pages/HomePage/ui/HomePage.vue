@@ -4,11 +4,10 @@
       justify="space-between"
   >
     <InputSearch
-        v-model:value="value"
+        v-model:value="searchQuery"
         placeholder="Поиск по ФИО"
         enter-button
         :style="{ maxWidth: '20%' }"
-        @search="onSearch"
     />
     <div>
       <Button
@@ -20,7 +19,7 @@
       </Button>
       <Modal
           v-model:open="open"
-          title="Добавить огранизцию"
+          title="Добавить организацию"
           @ok="handleOk"
       >
         <Form
@@ -30,25 +29,25 @@
             name="form_in_modal"
         >
           <FormItem
-              name="name"
+              name="organizationName"
               label="Название"
-              :rules="[{ required: true, message: 'Пожалуйста укажите название организации!' }]"
+              :rules="[{ required: true, message: 'Пожалуйста, укажите название организации!' }]"
           >
-            <Input v-model:value="formState.name" />
+            <Input v-model:value="formState.organizationName" />
           </FormItem>
           <FormItem
-              name="number"
+              name="phoneNumber"
               label="Номер телефона"
-              :rules="[{ required: true, message: 'Пожалуйста укажите номер телефона организации!' }]"
+              :rules="[{ required: true, message: 'Пожалуйста, укажите номер телефона организации!' }]"
           >
-            <Input v-model:value="formState.number" />
+            <Input v-model:value="formState.phoneNumber" />
           </FormItem>
           <FormItem
-              name="boss"
+              name="bossName"
               label="ФИО Директора"
-              :rules="[{ required: true, message: 'Пожалуйста укажите ФИО директора организации!' }]"
+              :rules="[{ required: true, message: 'Пожалуйста, укажите ФИО директора организации!' }]"
           >
-            <Input v-model:value="formState.boss" />
+            <Input v-model:value="formState.bossName" />
           </FormItem>
         </Form>
         <template #footer>
@@ -72,8 +71,8 @@
   </Flex>
   <Table
       :columns="columns"
-      :data-source="dataSource?.data?.results"
-      :row-key="record => record.login.uuid"
+      :data-source="searchedData"
+      :row-key="record => record.id"
       :pagination="pagination"
       :loading="loading"
       :scroll="{ y: 450 }"
@@ -83,10 +82,10 @@
     <template #bodyCell="{ column, record }">
       <template v-if="column.key === 'organization'">
         <span>
-          ООО "{{ record.name.first }} {{ record.name.last }}"
+          ООО "{{ record.login.username }}"
         </span>
       </template>
-      <template v-else-if="column.key === 'name'">
+      <template v-else-if="column.key === 'boss'">
         <span>
           {{ record.name.first }} {{ record.name.last }}
         </span>
@@ -102,137 +101,124 @@
     </template>
   </Table>
 </template>
-<script lang="ts" setup>
-import {ref} from 'vue';
+
+<script setup lang="ts">
+import { ref, reactive, onMounted, computed } from 'vue';
 import { CloseOutlined } from '@ant-design/icons-vue';
 import { Table, Button, Popconfirm, InputSearch, Flex, Modal, Form, Input, FormItem } from 'ant-design-vue';
-import type { FormInstance, TableColumnsType, TableProps } from 'ant-design-vue';
-import { usePagination } from 'vue-request';
-import axios from 'axios';
+import { useUsersModel } from '~/entities/user/model';
+import {debounce} from "~/entities/user/lib";
 
-interface Values {
-  number: string;
-  name: string;
-  boss: string;
-}
-const formRef = ref<FormInstance>();
-
-const formState = reactive<Values>({
-  number: '',
-  name: '',
-  boss: '',
-});
-
-type APIParams = {
-  results: number;
-  page?: number;
-  sortField?: string;
-  sortOrder?: number;
-  [key: string]: any;
-};
-
-type APIResult = {
-  results: {
-    name: string;
-    phone: string;
-  }[];
-};
-const value = ref<string>('');
-
-const onSearch = (searchValue: string) => {
-  // Тут я отправляю get с параметром поиска (т.е. фильтр) "типо"
-  const test = dataSource.value?.data?.results.filter(item => {
-    const name = item.name.first + ' '+ item.name.last
-    return name.toLowerCase().includes(searchValue.toLowerCase());
-  });
-
-  // Тут я обновляю данные "типо"
-  dataSource.value = { data: { results: test } };
-};
-const queryData = (params: APIParams) => {
-  return axios.get<APIResult>('https://randomuser.me/api?noinfo', { params });
-};
-
-
-
-const {
-  data: dataSource,
-  run,
-  loading,
-  current,
-  pageSize,
-} = usePagination(queryData, {
-  formatResult: res => res.data.results,
-  pagination: {
-    currentKey: 'page',
-    pageSizeKey: 'results',
-  },
-});
 const open = ref<boolean>(false);
+const formRef = ref();
+
+interface FormState {
+  bossName: string;
+  phoneNumber: string;
+  organizationName: string;
+}
+
+const formState = reactive<FormState>({
+  organizationName: '',
+  bossName: '',
+  phoneNumber: '',
+});
+
+const searchQuery = ref<string>('');
+
+const organizationStore = useUsersModel();
 const showModal = () => {
   open.value = true;
 };
-
+const handleCancel = () => {
+  open.value = false;
+};
 const handleOk = () => {
   formRef.value
       .validateFields()
       .then(values => {
-        formRef.value.resetFields();
+        console.log(formState)
         const newItem = {
-          name: formState.name,
-          phone: formState.number,
-          login: { uuid: Date.now() }
+          name: {
+            first: '',
+            last: formState.bossName
+          },
+          login: {
+            username: formState.organizationName,
+            uuid: Date.now()
+          },
+          phone: formState.phoneNumber,
         };
-        console.log('Будет отправле запрос на добавление записи: ', newItem);
-        console.log('Запросил обновление информация')
+        organizationStore.addOrganization(newItem);
+        open.value = false;
+        formRef.value.resetFields();
       })
       .catch(info => {
-        console.log('Не прошла валидацию:', info);
+        console.log('Validation failed:', info);
       });
 };
-
-const handleCancel = () => {
-  open.value = false;
-};
-const onDelete = (key: string) => {
-  console.log('Будет удаление записи с ключом: ', key);
-  console.log('Запросил обновление информация')
+const onDelete = (id: string) => {
+  organizationStore.deleteOrganization(id);
 };
 
+const handleTableChange = (pag: { pageSize: number; current: number }) => {
+  const paramsPage = {
+    page: pag.current,
+    pageSize: pag.pageSize,
+  }
+  organizationStore.changePagination(paramsPage);
+};
+const handleResizeColumn = (w, col) => {
+  col.width = w;
+};
 const pagination = computed(() => ({
-  total: 100,
-  current: current.value,
-  pageSize: pageSize.value,
+  pageSize: organizationStore.pageSize,
+  current: organizationStore.current,
+  total: organizationStore.SearchResults.length > 0 ? organizationStore.SearchResults.length : organizationStore.organizations.length,
 }));
-
-const handleTableChange: TableProps['onChange'] = (
-    pag: { pageSize: number; current: number },
-    filters: any,
-    sorter: any,
-) => {
-  run({
-    results: pag.pageSize,
-    page: pag?.current,
-    sortField: sorter.field,
-    sortOrder: sorter.order,
-    ...filters,
-  });
-};
-
-const columns = ref<TableColumnsType>([
+const loading = computed(() => (organizationStore.loading));
+const columns = ([
   {
     dataIndex: 'organization',
     key: 'organization',
     title: 'Название',
     resizable: true,
-    sorter: true,
+    sorter: {
+      compare: (a, b) => {
+        const nameA = a.login.username;
+        const nameB = b.login.username;
+
+        if (nameA < nameB) {
+          return -1;
+        }
+        if (nameA > nameB) {
+          return 1;
+        }
+        return 0;
+      },
+      multiple: 2,
+    },
     width: 200,
   },
   {
     title: 'ФИО Директора',
-    dataIndex: 'name',
-    key: 'name',
-    sorter: true,
+    dataIndex: 'boss',
+    key: 'boss',
+    sorter: {
+      compare: (a, b) => {
+        const nameA = a.name.first + ' ' + a.name.last;
+        const nameB = b.name.first + ' ' + b.name.last;
+
+        if (nameA < nameB) {
+          return -1;
+        }
+        if (nameA > nameB) {
+          return 1;
+        }
+        return 0;
+      },
+      multiple: 1,
+    },
     resizable: true,
     width: 200,
     minWidth: 200,
@@ -256,8 +242,19 @@ const columns = ref<TableColumnsType>([
     maxWidth: 400,
   },
 ]);
-const handleResizeColumn = (w, col) => {
-  col.width = w;
-}
-</script>
+const searchOrganizationDebounced = debounce(organizationStore.searchOrganization, 700);
+const searchedData = computed(() => {
+  if (searchQuery.value.trim() !== '') {
+    searchOrganizationDebounced(searchQuery.value);
+    return organizationStore.SearchResults.length > 0 ? organizationStore.SearchResults : organizationStore.organizations;
+  } else {
+    return organizationStore.organizations;
+  }
+});
 
+onMounted(() => {
+  organizationStore.queryData({ results: 100 });
+});
+
+
+</script>
